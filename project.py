@@ -611,7 +611,7 @@ class Project:
             os.path.join(final_dir, "metrics.csv"),
             os.path.join(stats_dir, "metrics.csv"),
         )
-        (yosys_synth_dir,) = glob.glob(os.path.join(run_dir, "*yosys-synthesis"))
+        (yosys_synth_dir,) = glob.glob(os.path.join(run_dir, "*yosys-vhdlsynthesis"))
         shutil.copyfile(
             os.path.join(yosys_synth_dir, "reports", "stat.rpt"),
             os.path.join(stats_dir, "synthesis-stats.txt"),
