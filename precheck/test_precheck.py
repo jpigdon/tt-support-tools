@@ -9,9 +9,20 @@ import pytest
 import precheck
 
 PDK_ROOT = os.getenv("PDK_ROOT")
-PDK_NAME = os.getenv("PDK_NAME") or "sky130A"
-LYP_FILE = f"{PDK_ROOT}/{PDK_NAME}/libs.tech/klayout/tech/{PDK_NAME}.lyp"
+PDK_NAME = os.getenv("PDK") or "sky130A"
+LYP_NAME = "gf180mcu" if PDK_NAME == "gf180mcuD" else PDK_NAME
+LYP_FILE = f"{PDK_ROOT}/{PDK_NAME}/libs.tech/klayout/tech/{LYP_NAME}.lyp"
 gds_layers = klayout_tools.parse_lyp_layers(LYP_FILE)
+
+sky130A_only = pytest.mark.skipif(
+    PDK_NAME != "sky130A", reason="test only valid for PDK=sky130A"
+)
+gf180mcuD_only = pytest.mark.skipif(
+    PDK_NAME != "gf180mcuD", reason="test only valid for PDK=gf180mcuD"
+)
+
+
+# FIXTURES
 
 
 @pytest.fixture(scope="session")
@@ -339,7 +350,7 @@ def generate_analog_example(
 
         tcl_append(
             f"""
-            def read ../tech/sky130A/def/analog/tt_analog_1x2.def
+            def read ../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def
             cellname rename tt_um_template {toplevel}
             """
         )
@@ -562,50 +573,98 @@ def verilog_syntax_error(tmp_path_factory: pytest.TempPathFactory):
     return str(verilog_file)
 
 
+@pytest.fixture(scope="session")
+def gds_antenna_pass(tmp_path_factory: pytest.TempPathFactory):
+    """Creates a GDS without antenna violation."""
+    gds_file = tmp_path_factory.mktemp("gds") / "TEST_antenna_pass.gds"
+    layout = pya.Layout()
+    poly2_info = gds_layers["Poly2"]
+    poly2 = layout.layer(poly2_info.layer, poly2_info.data_type)
+    comp_info = gds_layers["COMP"]
+    comp = layout.layer(comp_info.layer, comp_info.data_type)
+    top_cell = layout.create_cell("TEST_antenna_pass")
+    poly2_rect = pya.DBox(0, 0, 1, 3)
+    top_cell.shapes(poly2).insert(poly2_rect)
+    comp_rect = pya.DBox(-1, 1, 2, 2)
+    top_cell.shapes(comp).insert(comp_rect)
+    layout.write(str(gds_file))
+    return str(gds_file)
+
+
+@pytest.fixture(scope="session")
+def gds_antenna_fail(tmp_path_factory: pytest.TempPathFactory):
+    """Creates a GDS with antenna violation."""
+    gds_file = tmp_path_factory.mktemp("gds") / "TEST_antenna_fail.gds"
+    layout = pya.Layout()
+    poly2_info = gds_layers["Poly2"]
+    poly2 = layout.layer(poly2_info.layer, poly2_info.data_type)
+    comp_info = gds_layers["COMP"]
+    comp = layout.layer(comp_info.layer, comp_info.data_type)
+    top_cell = layout.create_cell("TEST_antenna_fail")
+    poly2_rect = pya.DBox(0, 0, 1, 500)
+    top_cell.shapes(poly2).insert(poly2_rect)
+    comp_rect = pya.DBox(-1, 1, 2, 2)
+    top_cell.shapes(comp).insert(comp_rect)
+    layout.write(str(gds_file))
+    return str(gds_file)
+
+
+# TESTS
+
+
+@sky130A_only
 def test_magic_drc_pass(gds_valid: str):
     precheck.magic_drc(gds_valid, "TEST_valid")
 
 
+@sky130A_only
 def test_magic_drc_fail(gds_fail_met1_poly: str):
     with pytest.raises(precheck.PrecheckFailure):
         precheck.magic_drc(gds_fail_met1_poly, "TEST_met1_error")
 
 
+@sky130A_only
 def test_klayout_feol_pass(gds_valid: str):
     precheck.klayout_drc(gds_valid, "feol")
 
 
+@sky130A_only
 def test_klayout_feol_fail(gds_fail_nwell_poly: str):
     with pytest.raises(precheck.PrecheckFailure):
         precheck.klayout_drc(gds_fail_nwell_poly, "feol")
 
 
+@sky130A_only
 def test_klayout_beol_pass(gds_valid: str):
     precheck.klayout_drc(gds_valid, "beol")
 
 
+@sky130A_only
 def test_klayout_beol_fail(gds_fail_met1_poly: str):
     with pytest.raises(precheck.PrecheckFailure):
         precheck.klayout_drc(gds_fail_met1_poly, "beol")
 
 
+@sky130A_only
 def test_klayout_checks_pass(gds_valid: str):
-    precheck.klayout_checks(gds_valid, "TEST_valid", "sky130A")
+    precheck.klayout_checks(gds_valid, "TEST_valid", PDK_NAME)
 
 
+@sky130A_only
 def test_klayout_checks_fail_metal5(gds_fail_metal5_poly: str):
     with pytest.raises(
         precheck.PrecheckFailure, match=r"Forbidden layer met5\.drawing found in .+"
     ):
-        precheck.klayout_checks(gds_fail_metal5_poly, "TEST_met5_error", "sky130A")
+        precheck.klayout_checks(gds_fail_metal5_poly, "TEST_met5_error", PDK_NAME)
 
 
+@sky130A_only
 def test_klayout_checks_fail_pr_boundary(gds_no_pr_boundary: str):
     with pytest.raises(
         precheck.PrecheckFailure,
         match=r"prBoundary.boundary \(235/4\) layer not found in .+",
     ):
-        precheck.klayout_checks(gds_no_pr_boundary, "TEST_no_prboundary", "sky130A")
+        precheck.klayout_checks(gds_no_pr_boundary, "TEST_no_prboundary", PDK_NAME)
 
 
 def test_klayout_top_module_name(gds_invalid_macro_name: str):
@@ -614,22 +673,25 @@ def test_klayout_top_module_name(gds_invalid_macro_name: str):
         match="Top macro name mismatch: expected TEST_invalid_macro_name, got wrong_name",
     ):
         precheck.klayout_checks(
-            gds_invalid_macro_name, "TEST_invalid_macro_name", "sky130A"
+            gds_invalid_macro_name, "TEST_invalid_macro_name", PDK_NAME
         )
 
 
+@sky130A_only
 def test_klayout_zero_area_drc_pass(gds_valid: str):
     precheck.klayout_zero_area(gds_valid)
 
 
+@sky130A_only
 def test_klayout_zero_area_drc_fail(gds_zero_area: str):
     with pytest.raises(precheck.PrecheckFailure, match="Klayout zero_area failed"):
         precheck.klayout_zero_area(gds_zero_area)
 
 
+@sky130A_only
 def test_shapes_outside_area(gds_shapes_outside_area: str):
     with pytest.raises(precheck.PrecheckFailure, match="Shapes outside project area"):
-        precheck.boundary_check(gds_shapes_outside_area, "sky130A")
+        precheck.boundary_check(gds_shapes_outside_area, PDK_NAME)
 
 
 def test_wrong_power_pins_1(verilog_lef_wrong_power_pins: tuple[str, str]):
@@ -664,7 +726,7 @@ def test_missing_use_ground(verilog_lef_missing_use_ground: tuple[str, str]):
 
 def test_invalid_layer(gds_invalid_layer: str):
     with pytest.raises(precheck.PrecheckFailure, match="Invalid layers in GDS"):
-        precheck.layer_check(gds_invalid_layer, "sky130A")
+        precheck.layer_check(gds_invalid_layer, PDK_NAME)
 
 
 def test_invalid_cell_name(gds_invalid_cell_name: str):
@@ -675,6 +737,7 @@ def test_invalid_cell_name(gds_invalid_cell_name: str):
         precheck.cell_name_check(gds_invalid_cell_name)
 
 
+@sky130A_only
 def test_urpm_nwell_too_close(gds_urpm_nwell_too_close: str):
     with pytest.raises(
         precheck.PrecheckFailure,
@@ -683,30 +746,33 @@ def test_urpm_nwell_too_close(gds_urpm_nwell_too_close: str):
         precheck.urpm_nwell_check(gds_urpm_nwell_too_close, "TEST_urpm_nwell_too_close")
 
 
+@sky130A_only
 def test_pin_analog_example(gds_lef_analog_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_example
     precheck.pin_check(
         gds_file,
         lef_file,
-        "../tech/sky130A/def/analog/tt_analog_1x2.def",
+        f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
         "TEST_analog_example",
         False,
-        "sky130A",
+        PDK_NAME,
     )
 
 
+@sky130A_only
 def test_pin_analog_power_compat(gds_lef_analog_power_compat: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_power_compat
     precheck.pin_check(
         gds_file,
         lef_file,
-        "../tech/sky130A/def/analog/tt_analog_1x2.def",
+        f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
         "TEST_analog_power_compat",
         False,
-        "sky130A",
+        PDK_NAME,
     )
 
 
+@sky130A_only
 def test_pin_analog_wrong_vgnd(gds_lef_analog_wrong_vgnd: tuple[str, str]):
     with pytest.raises(
         precheck.PrecheckFailure,
@@ -716,13 +782,14 @@ def test_pin_analog_wrong_vgnd(gds_lef_analog_wrong_vgnd: tuple[str, str]):
         precheck.pin_check(
             gds_file,
             lef_file,
-            "../tech/sky130A/def/analog/tt_analog_1x2.def",
+            f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
             "TEST_analog_wrong_vgnd",
             False,
-            "sky130A",
+            PDK_NAME,
         )
 
 
+@sky130A_only
 def test_pin_analog_overlapping_vgnd(gds_lef_analog_overlapping_vgnd: tuple[str, str]):
     with pytest.raises(
         precheck.PrecheckFailure,
@@ -732,37 +799,40 @@ def test_pin_analog_overlapping_vgnd(gds_lef_analog_overlapping_vgnd: tuple[str,
         precheck.pin_check(
             gds_file,
             lef_file,
-            "../tech/sky130A/def/analog/tt_analog_1x2.def",
+            f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
             "TEST_analog_overlapping_vgnd",
             False,
-            "sky130A",
+            PDK_NAME,
         )
 
 
+@sky130A_only
 def test_pin_analog_compound_vgnd(gds_lef_analog_compound_vgnd: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_compound_vgnd
     precheck.pin_check(
         gds_file,
         lef_file,
-        "../tech/sky130A/def/analog/tt_analog_1x2.def",
+        f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
         "TEST_analog_compound_vgnd",
         False,
-        "sky130A",
+        PDK_NAME,
     )
 
 
+@sky130A_only
 def test_pin_analog_example_3v3(gds_lef_analog_example_3v3: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_example_3v3
     precheck.pin_check(
         gds_file,
         lef_file,
-        "../tech/sky130A/def/analog/tt_analog_1x2.def",
+        f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
         "TEST_analog_example_3v3",
         True,
-        "sky130A",
+        PDK_NAME,
     )
 
 
+@sky130A_only
 def test_pin_analog_3v3_mismatch1(gds_lef_analog_example: tuple[str, str]):
     with pytest.raises(
         precheck.PrecheckFailure,
@@ -772,13 +842,14 @@ def test_pin_analog_3v3_mismatch1(gds_lef_analog_example: tuple[str, str]):
         precheck.pin_check(
             gds_file,
             lef_file,
-            "../tech/sky130A/def/analog/tt_analog_1x2.def",
+            f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
             "TEST_analog_example",
             True,
-            "sky130A",
+            PDK_NAME,
         )
 
 
+@sky130A_only
 def test_pin_analog_3v3_mismatch2(gds_lef_analog_example_3v3: tuple[str, str]):
     with pytest.raises(
         precheck.PrecheckFailure,
@@ -788,20 +859,22 @@ def test_pin_analog_3v3_mismatch2(gds_lef_analog_example_3v3: tuple[str, str]):
         precheck.pin_check(
             gds_file,
             lef_file,
-            "../tech/sky130A/def/analog/tt_analog_1x2.def",
+            f"../tech/{PDK_NAME}/def/analog/tt_analog_1x2.def",
             "TEST_analog_example_3v3",
             False,
-            "sky130A",
+            PDK_NAME,
         )
 
 
+@sky130A_only
 def test_analog_exact_pins(gds_lef_analog_pin_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_pin_example
     precheck.analog_pin_check(
-        gds_file, "sky130A", True, False, 2, {"ua[0]": "x", "ua[1]": "x"}
+        gds_file, PDK_NAME, True, False, 2, {"ua[0]": "x", "ua[1]": "x"}
     )
 
 
+@sky130A_only
 def test_analog_less_pins(gds_lef_analog_pin_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_pin_example
     with pytest.raises(
@@ -809,10 +882,11 @@ def test_analog_less_pins(gds_lef_analog_pin_example: tuple[str, str]):
         match="Analog pin `ua\\[1\\]` is connected to some metal but `analog_pins` is set to 1 .*",
     ):
         precheck.analog_pin_check(
-            gds_file, "sky130A", True, False, 1, {"ua[0]": "x", "ua[1]": "x"}
+            gds_file, PDK_NAME, True, False, 1, {"ua[0]": "x", "ua[1]": "x"}
         )
 
 
+@sky130A_only
 def test_analog_more_pins(gds_lef_analog_pin_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_pin_example
     with pytest.raises(
@@ -820,19 +894,21 @@ def test_analog_more_pins(gds_lef_analog_pin_example: tuple[str, str]):
         match="Analog pin `ua\\[2\\]` is not connected to any adjacent metal but `analog_pins` is set to 3 .*",
     ):
         precheck.analog_pin_check(
-            gds_file, "sky130A", True, False, 3, {"ua[0]": "x", "ua[1]": "x"}
+            gds_file, PDK_NAME, True, False, 3, {"ua[0]": "x", "ua[1]": "x"}
         )
 
 
+@sky130A_only
 def test_analog_less_ua_entries(gds_lef_analog_pin_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_pin_example
     with pytest.raises(
         precheck.PrecheckFailure,
         match="Analog pin `ua\\[1\\]` is connected to some metal but the description of `ua\\[1\\]` .*",
     ):
-        precheck.analog_pin_check(gds_file, "sky130A", True, False, 2, {"ua[0]": "x"})
+        precheck.analog_pin_check(gds_file, PDK_NAME, True, False, 2, {"ua[0]": "x"})
 
 
+@sky130A_only
 def test_analog_more_ua_entries(gds_lef_analog_pin_example: tuple[str, str]):
     gds_file, lef_file = gds_lef_analog_pin_example
     with pytest.raises(
@@ -841,7 +917,7 @@ def test_analog_more_ua_entries(gds_lef_analog_pin_example: tuple[str, str]):
     ):
         precheck.analog_pin_check(
             gds_file,
-            "sky130A",
+            PDK_NAME,
             True,
             False,
             2,
@@ -859,3 +935,17 @@ def test_verilog_syntax_error(verilog_syntax_error: str):
         match="Verilog syntax check failed",
     ):
         precheck.verilog_syntax_check(verilog_syntax_error)
+
+
+@gf180mcuD_only
+def test_antenna_pass(gds_antenna_pass: str):
+    precheck.klayout_gf180mcuD_antenna(gds_antenna_pass)
+
+
+@gf180mcuD_only
+def test_antenna_fail(gds_antenna_fail: str):
+    with pytest.raises(
+        precheck.PrecheckFailure,
+        match="Klayout antenna failed with 1 DRC violations",
+    ):
+        precheck.klayout_gf180mcuD_antenna(gds_antenna_fail)

@@ -1,4 +1,4 @@
-name: Precheck Tests
+name: Precheck Tests (sky130)
 
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
 
       - name: Run tests
         working-directory: precheck
-        run: nix-shell --run "pytest --junit-xml=test_results.xml"
+        run: nix-shell --run "PDK=sky130A pytest --junit-xml=test_results.xml"
         
       - name: Test Summary
         uses: test-summary/action@v2.4

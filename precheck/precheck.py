@@ -95,10 +95,16 @@ def klayout_custom_drc(
         )
 
 
-def klayout_drc(gds: str, check: str, script=f"{PDK_NAME}_mr.drc", extra_vars=[]):
+def klayout_drc(
+    gds: str,
+    check: str,
+    script=f"{PDK_NAME}_mr.drc",
+    script_dir="tech-files",
+    extra_vars=[],
+):
     logging.info(f"Running klayout {check} on {gds}")
     if "/" not in script:
-        script = f"tech-files/{script}"
+        script = f"{script_dir}/{script}"
     script_vars = {
         check: "true",
         "input": gds,
@@ -117,6 +123,15 @@ def klayout_sg13g2(gds: str):
         gds,
         "sg13g2",
         f"{PDK_ROOT}/{PDK_NAME}/libs.tech/klayout/tech/drc/ihp-sg13g2.drc",
+    )
+
+
+def klayout_gf180mcuD_antenna(gds: str):
+    return klayout_drc(
+        gds,
+        "antenna",
+        "antenna.drc",
+        script_dir=f"{PDK_ROOT}/{PDK_NAME}/libs.tech/klayout/tech/drc/rule_decks",
     )
 
 
@@ -460,6 +475,11 @@ def main():
             "name": "urpm/nwell check",
             "check": lambda: urpm_nwell_check(gds_file, top_module),
             "techs": ["sky130A"],
+        },
+        {
+            "name": "Antenna check",
+            "check": lambda: klayout_gf180mcuD_antenna(gds_file),
+            "techs": ["gf180mcuD"],
         },
         {
             "name": "Analog pin check",
